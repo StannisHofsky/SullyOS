@@ -47,11 +47,11 @@
       align-items: stretch;
     }
     .app > header {
-      position: absolute; top: 12px; left: 0; right: 0;
+      position: absolute; top: 6px; left: 0; right: 0;
       pointer-events: none;
     }
     .app > .stage {
-      flex: 1; padding-top: 60px;
+      flex: 1; padding-top: 44px;
     }
     .app > .action-row {
       position: absolute; bottom: 20px; left: 24px;
@@ -68,20 +68,20 @@
     }
   }
 
-  header { flex-shrink: 0; padding: 12px 20px 4px; text-align: center; }
+  header { flex-shrink: 0; padding: 6px 20px 2px; text-align: center; }
   .title-cn {
-    font-size: 17px; font-weight: 600; letter-spacing: 2px; color: var(--rose-dark);
-    display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 14px; font-weight: 600; letter-spacing: 1px; color: var(--rose-dark);
+    display: flex; align-items: center; justify-content: center; gap: 6px;
   }
   .title-cn::before, .title-cn::after {
-    content: ""; width: 24px; height: 1px;
+    content: ""; width: 18px; height: 1px;
     background: linear-gradient(90deg, transparent, var(--rose-deep), transparent);
   }
-  .title-en { font-size: 9px; letter-spacing: 4px; color: var(--text-soft); margin-top: 2px; }
+  .title-en { font-size: 8px; letter-spacing: 3px; color: var(--text-soft); margin-top: 1px; }
 
   .stage {
     flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
-    padding: 6px 16px; position: relative;
+    padding: 4px 16px; position: relative;
   }
   .character-frame {
     width: 100%; max-width: 380px;

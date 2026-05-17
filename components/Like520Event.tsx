@@ -304,9 +304,13 @@ const Y520Scene: React.FC<Y520SceneProps> = ({ callA, charName, charAvatar, char
     const itemsCols = callA.anchors.length > 6 ? 'grid-cols-4' : 'grid-cols-3';
 
     return (
-        <div className="flex flex-col h-full max-w-md mx-auto">
+        <div className="relative flex flex-col h-full max-w-md mx-auto overflow-hidden">
+            {/* Cinematic letterbox 上下黑条（轻微，给"剧场感"） */}
+            <div className="absolute top-0 inset-x-0 bg-black z-[5] pointer-events-none" style={{ height: '3vh' }} />
+            <div className="absolute bottom-0 inset-x-0 bg-black z-[5] pointer-events-none" style={{ height: '3vh' }} />
+
             {/* Header */}
-            <div className="flex items-center gap-2 px-3 pt-3 pb-2 shrink-0">
+            <div className="flex items-center gap-2 px-3 pt-[calc(3vh+10px)] pb-2 shrink-0 relative z-10">
                 <div className="flex items-center gap-2 bg-[#5C3A2E]/90 rounded-full pl-1 pr-3 py-1 shadow">
                     {charAvatar?.startsWith('http') || charAvatar?.startsWith('data:') ? (
                         <img src={charAvatar} alt={charName} className="w-7 h-7 rounded-full object-cover border-2 border-[#FFE4D5]" />
@@ -324,7 +328,7 @@ const Y520Scene: React.FC<Y520SceneProps> = ({ callA, charName, charAvatar, char
             </div>
 
             {/* Shelf (items) */}
-            <div className="px-3 pt-1 pb-1 shrink-0">
+            <div className="px-3 pt-1 pb-1 shrink-0 relative z-10">
                 <div className={`grid gap-1.5 ${itemsCols}`}>
                     {callA.anchors.map((a, i) => {
                         const used = usedAnchors.has(i);
@@ -353,7 +357,7 @@ const Y520Scene: React.FC<Y520SceneProps> = ({ callA, charName, charAvatar, char
             </div>
 
             {/* Chibi area */}
-            <div className="flex-1 flex items-center justify-center min-h-0 relative">
+            <div className="flex-1 flex items-center justify-center min-h-0 relative z-10">
                 <button
                     onClick={touchChibi}
                     disabled={stage !== 'free'}
@@ -370,7 +374,7 @@ const Y520Scene: React.FC<Y520SceneProps> = ({ callA, charName, charAvatar, char
             </div>
 
             {/* Galgame dialogue box */}
-            <div className="px-3 pb-3 pt-2 shrink-0">
+            <div className="px-3 pb-[calc(3vh+12px)] pt-2 shrink-0 relative z-10">
                 <DialogueBox
                     charName={nameTag}
                     onAdvance={stage === 'tucao_choose' ? undefined : (queue.length > 0 ? advance : undefined)}
@@ -455,10 +459,34 @@ const UncoveredLineView: React.FC<{
     };
 
     return (
-        <div className="flex flex-col h-full max-w-md mx-auto">
-            {/* Header */}
-            <div className="px-3 pt-3 pb-1 shrink-0">
-                <div className="flex items-center gap-2 bg-[#5C3A2E]/90 rounded-full pl-1 pr-4 py-1 shadow w-fit">
+        <div
+            className="relative h-full w-full max-w-md mx-auto overflow-hidden"
+            style={{ background: 'linear-gradient(180deg, #FFF1E6 0%, #FFE4EC 45%, #FFD1DC 100%)' }}
+        >
+            {/* Cinematic letterbox（黑框在身后挡颜色，chibi 可探出来形成 3D 感） */}
+            <div className="absolute top-0 inset-x-0 bg-black z-[5] pointer-events-none" style={{ height: '9vh' }} />
+            <div className="absolute bottom-0 inset-x-0 bg-black z-[5] pointer-events-none" style={{ height: '9vh' }} />
+
+            {/* Chibis 居中、底部对齐，能"穿过"黑框区域形成立体感 */}
+            <div
+                className="absolute inset-x-0 z-[10] flex items-end justify-center gap-2 px-4 pointer-events-none"
+                style={{ top: 0, bottom: '14vh' }}
+            >
+                <img
+                    src={charChibi}
+                    alt="char"
+                    className="max-h-full max-w-[42%] object-contain object-bottom drop-shadow-[0_8px_24px_rgba(199,97,130,0.35)]"
+                />
+                <img
+                    src={userChibi}
+                    alt="user"
+                    className="max-h-full max-w-[42%] object-contain object-bottom drop-shadow-[0_8px_24px_rgba(199,97,130,0.35)]"
+                />
+            </div>
+
+            {/* Name tag — 浮在左上 letterbox 下方 */}
+            <div className="absolute left-3 z-[20]" style={{ top: 'calc(9vh + 12px)' }}>
+                <div className="flex items-center gap-2 bg-[#5C3A2E]/90 rounded-full pl-1 pr-4 py-1 shadow">
                     {charAvatar?.startsWith('http') || charAvatar?.startsWith('data:') ? (
                         <img src={charAvatar} alt={charName} className="w-7 h-7 rounded-full object-cover border-2 border-[#FFE4D5]" />
                     ) : (
@@ -467,22 +495,18 @@ const UncoveredLineView: React.FC<{
                     <span className="text-white text-xs font-bold tracking-wider">{charName}</span>
                 </div>
             </div>
-            {/* Both chibis */}
-            <div className="flex-1 flex items-end justify-center gap-1 px-4 pb-1 min-h-0">
-                <img src={charChibi} alt="char" className="max-h-full max-w-[40%] object-contain drop-shadow-md" />
-                <img src={userChibi} alt="user" className="max-h-full max-w-[40%] object-contain drop-shadow-md" />
-            </div>
-            {/* Long monologue dialogue box */}
-            <div className="px-3 pb-3 pt-2 shrink-0">
+
+            {/* 对白盒 — 居中下三分位，让 chibi 头部能从盒子上方露出来 */}
+            <div className="absolute inset-x-0 px-3 z-[20]" style={{ bottom: 'calc(9vh + 14px)' }}>
                 <DialogueBox
                     charName={charName}
                     onAdvance={advance}
                     showArrow={true}
                     arrowGlyph={isLast ? '✓' : '▽'}
                     pageInfo={`${idx + 1} / ${lines.length}`}
-                    minHeight={130}
+                    minHeight={140}
                 >
-                    <div key={idx} className="text-[#5C3A4A] text-[14px] leading-[1.9] pt-2 whitespace-pre-wrap animate-fade-in">
+                    <div key={idx} className="text-[#5C3A4A] text-[14px] leading-[1.95] pt-2 whitespace-pre-wrap animate-fade-in">
                         {lines[idx]}
                     </div>
                 </DialogueBox>
