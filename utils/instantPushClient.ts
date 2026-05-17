@@ -314,6 +314,9 @@ export async function sendTestInstantPush(
 
   // amsg-instant 0.4.0+ runs normalizeAiApiUrl Worker-side; we can forward
   // apiConfig.baseUrl as-is (root / /v1 / full /chat/completions all accepted).
+  //
+  // metadata.test = true 让 SW push handler 绕过"前台跳过 showNotification"
+  // 逻辑 — 测试就是要看到通知, 不能被前台静默吃掉.
   return sendInstantPush({
     contactName: 'Instant Push 测试',
     completePrompt: '用一句话简短地和用户说一声 hi，确认 Instant Push 工作正常',
@@ -321,5 +324,6 @@ export async function sendTestInstantPush(
     apiKey: apiConfig.apiKey,
     primaryModel: apiConfig.model,
     pushSubscription: sub,
+    metadata: { test: true },
   });
 }

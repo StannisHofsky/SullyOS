@@ -9,7 +9,7 @@
  * 手工 bump。前端 BuildBadge 通过 GET_SW_VERSION postMessage 协议读取并显示，
  * 用来确认线上跑的是哪一版 SW（PWA 缓存了旧 SW 时一眼能看出来）。
  */
-const SW_VERSION = '1.2.0';
+const SW_VERSION = '1.3.0';
 
 const PING_INTERVAL = 15_000;
 const MAX_MANUAL_ALIVE_MS = 5 * 60_000;
@@ -317,13 +317,17 @@ self.addEventListener('push', function (event) {
   // 改成"有 client 就完全不调 showNotification"。
   // 消息由 OSContext 的 in-app toast + unread badge + 聊天页气泡兜底。
   // 不在前台才弹真实系统通知。
+  //
+  // 例外: payload.metadata.test === true 时永远 showNotification —— 测试
+  // 推送就是要验证系统通知能不能弹, 前台静默会让用户以为"没送达"。
   var title = (payload && payload.contactName) || '新消息';
   var body = String((payload && payload.message) || (payload && payload.body) || '').trim();
+  var isTest = !!(payload && payload.metadata && payload.metadata.test === true);
   event.waitUntil((async function () {
     var clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     var hasFocused = clients.some(function (c) { return c.focused; });
     await saveIncomingActiveMessage(payload);
-    if (!hasFocused) {
+    if (!hasFocused || isTest) {
       await self.registration.showNotification(title, {
         body: body,
         icon: './icons/icon-192.png',
@@ -331,7 +335,7 @@ self.addEventListener('push', function (event) {
         data: { payload: payload },
       });
     }
-    // hasFocused === true: 直接跳过通知, 由 in-app UI 兜底
+    // 前台且非测试: 跳过通知, 由 in-app UI 兜底
   })());
 });
 
