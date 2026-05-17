@@ -50,15 +50,17 @@ export const InstantPushSettingsModal: React.FC<InstantPushSettingsModalProps> =
     clientToken: clientToken.trim() || undefined,
   });
 
-  const handleGenerateKeys = async () => {
+  const generateKeys = async (): Promise<{ publicKey: string; privateKey: string } | null> => {
     setGenerating(true);
     try {
       const kp = await generateVapidKeyPair();
       setVapidPublicKey(kp.publicKey);
       setPrivateKeyPreview(kp.privateKey);
+      return kp;
     } catch (e) {
       const err = e as { message?: string } | null;
       addToast(err?.message ?? '生成密钥对失败', 'error');
+      return null;
     } finally {
       setGenerating(false);
     }
@@ -91,17 +93,26 @@ export const InstantPushSettingsModal: React.FC<InstantPushSettingsModalProps> =
   };
 
   const handleCopyEnv = async () => {
-    const pub = vapidPublicKey.trim();
+    let pub = vapidPublicKey.trim();
+    let priv = privateKeyPreview;
+
+    if (!pub) {
+      const kp = await generateKeys();
+      if (!kp) return;
+      pub = kp.publicKey;
+      priv = kp.privateKey;
+    }
+
     const token = clientToken.trim();
     const lines = [
-      `VAPID_PUBLIC_KEY=${pub || '<填入生成的公钥>'}`,
-      `VAPID_PRIVATE_KEY=<去刚生成的弹窗复制>`,
+      `VAPID_PUBLIC_KEY=${pub}`,
+      priv ? `VAPID_PRIVATE_KEY=${priv}` : `VAPID_PRIVATE_KEY=<点"重新生成"获取新私钥>`,
       `# 可选：`,
       `# VAPID_EMAIL=mailto:you@example.com`,
       token ? `# AMSG_CLIENT_TOKEN=${token}` : `# AMSG_CLIENT_TOKEN=<你填的 Client Token>`,
     ];
     await navigator.clipboard.writeText(lines.join('\n'));
-    addToast('env 清单已复制', 'success');
+    addToast(priv ? 'env 已复制（含真实密钥）' : 'env 已复制', 'success');
   };
 
   const handleOpenCF = () => {
@@ -171,43 +182,9 @@ export const InstantPushSettingsModal: React.FC<InstantPushSettingsModalProps> =
     >
       <div className="space-y-5 text-sm">
 
-        {/* ① VAPID 密钥对 */}
+        {/* ① Worker 配置 */}
         <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">① 生成 VAPID 密钥对</p>
-
-          <button
-            onClick={() => void handleGenerateKeys()}
-            disabled={generating}
-            className={`w-full py-2.5 rounded-xl text-sm font-bold ${generating ? 'bg-slate-200 text-slate-400' : 'bg-indigo-500 text-white hover:bg-indigo-600'}`}
-          >
-            {generating ? '生成中…' : '生成新密钥对'}
-          </button>
-
-          {privateKeyPreview && (
-            <div className="space-y-2">
-              <p className="text-[11px] text-slate-500">私钥（一次性显示，关闭弹窗即消失）</p>
-              <div className="flex gap-2 items-start">
-                <textarea
-                  readOnly
-                  value={privateKeyPreview}
-                  rows={3}
-                  className="flex-1 font-mono text-[11px] bg-white border border-slate-200 rounded-xl p-2 resize-none leading-relaxed"
-                />
-                <button
-                  onClick={() => void handleCopyPrivateKey()}
-                  className="shrink-0 px-3 py-2 text-[11px] bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 font-medium"
-                >
-                  复制
-                </button>
-              </div>
-              <p className="text-[11px] text-amber-600 font-medium">⚠ 关闭弹窗即丢失，请立即复制</p>
-            </div>
-          )}
-        </div>
-
-        {/* ② Worker 配置 */}
-        <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">② Worker 配置</p>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">① Worker 配置</p>
 
           <div className="space-y-1">
             <label className="text-[11px] text-slate-500 font-medium">Worker URL</label>
@@ -221,12 +198,23 @@ export const InstantPushSettingsModal: React.FC<InstantPushSettingsModalProps> =
           </div>
 
           <div className="space-y-1">
-            <label className="text-[11px] text-slate-500 font-medium">VAPID 公钥（生成后自动填入）</label>
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] text-slate-500 font-medium">VAPID 公钥（首次复制 env 时自动生成）</label>
+              {vapidPublicKey.trim() && (
+                <button
+                  onClick={() => void generateKeys()}
+                  disabled={generating}
+                  className="text-[11px] text-indigo-500 hover:text-indigo-600 font-medium disabled:text-slate-400"
+                >
+                  {generating ? '生成中…' : '🔄 重新生成'}
+                </button>
+              )}
+            </div>
             <input
               type="text"
               value={vapidPublicKey}
               onChange={(e) => setVapidPublicKey(e.target.value)}
-              placeholder="BA…（生成密钥对后自动填入）"
+              placeholder="BA…（点下面「复制 env 清单」自动生成）"
               className="w-full text-[11px] font-mono bg-white border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-400"
             />
           </div>
@@ -261,10 +249,10 @@ export const InstantPushSettingsModal: React.FC<InstantPushSettingsModalProps> =
           </label>
         </div>
 
-        {/* ③ 部署 Worker */}
+        {/* ② 部署 Worker */}
         <div className="bg-slate-50 rounded-2xl p-4 space-y-2">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">③ 部署 Worker</p>
-          <p className="text-[11px] text-slate-500 leading-relaxed">部署前先完成①，然后把 Worker 代码贴进 CF 后台。</p>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">② 部署 Worker</p>
+          <p className="text-[11px] text-slate-500 leading-relaxed">点「复制 env 清单」会自动生成 VAPID 密钥对（首次）并写入剪贴板，然后把 Worker 代码贴进 CF 后台。</p>
 
           <div className="grid grid-cols-3 gap-2">
             <button
@@ -275,9 +263,10 @@ export const InstantPushSettingsModal: React.FC<InstantPushSettingsModalProps> =
             </button>
             <button
               onClick={() => void handleCopyEnv()}
-              className="py-2 rounded-xl text-[11px] font-bold bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+              disabled={generating}
+              className={`py-2 rounded-xl text-[11px] font-bold border border-slate-200 ${generating ? 'bg-slate-100 text-slate-400' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
             >
-              复制 env 清单
+              {generating ? '生成中…' : '复制 env 清单'}
             </button>
             <button
               onClick={handleOpenCF}
@@ -286,9 +275,30 @@ export const InstantPushSettingsModal: React.FC<InstantPushSettingsModalProps> =
               ↗ CF Dashboard
             </button>
           </div>
+
+          {privateKeyPreview && (
+            <div className="space-y-2 pt-2">
+              <p className="text-[11px] text-slate-500">私钥（一次性显示，关闭弹窗即消失）</p>
+              <div className="flex gap-2 items-start">
+                <textarea
+                  readOnly
+                  value={privateKeyPreview}
+                  rows={3}
+                  className="flex-1 font-mono text-[11px] bg-white border border-slate-200 rounded-xl p-2 resize-none leading-relaxed"
+                />
+                <button
+                  onClick={() => void handleCopyPrivateKey()}
+                  className="shrink-0 px-3 py-2 text-[11px] bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 font-medium"
+                >
+                  复制
+                </button>
+              </div>
+              <p className="text-[11px] text-amber-600 font-medium">⚠ env 清单里已带私钥；关闭弹窗后无法再看到</p>
+            </div>
+          )}
         </div>
 
-        {/* ④ 测试推送 */}
+        {/* ③ 测试推送 */}
         <div className="space-y-2">
           <button
             onClick={() => void handleTest()}
