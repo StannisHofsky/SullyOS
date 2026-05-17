@@ -4,7 +4,12 @@
  * A) Keep-alive: prevent browser from suspending during long AI fetch requests
  * B) Proactive timers: periodically notify the main thread to trigger AI messages
  *    for any number of characters independently.
+ *
+ * SW_VERSION: 改 SW 实质行为时（push handler / message protocol / 通知策略）
+ * 手工 bump。前端 BuildBadge 通过 GET_SW_VERSION postMessage 协议读取并显示，
+ * 用来确认线上跑的是哪一版 SW（PWA 缓存了旧 SW 时一眼能看出来）。
  */
+const SW_VERSION = '1.1.0';
 
 const PING_INTERVAL = 15_000;
 const MAX_MANUAL_ALIVE_MS = 5 * 60_000;
@@ -155,6 +160,12 @@ self.addEventListener('message', (event) => {
       break;
     case 'proactive-sync':
       syncProactive(event.data.configs || []);
+      break;
+    case 'GET_SW_VERSION':
+      // 前端 BuildBadge 查询，回 MessageChannel
+      if (event.ports && event.ports[0]) {
+        event.ports[0].postMessage({ version: SW_VERSION });
+      }
       break;
   }
 });
