@@ -242,11 +242,22 @@ const PhoneShell: React.FC = () => {
 
   // 520 特别活动弹窗（2026-05-20 当天，且没被 dismiss / completed）
   const [showLike520Popup, setShowLike520Popup] = useState(false);
+  // 用户在弹窗里点了"API 配置" → 弹窗先隐藏让 Settings 露出来；
+  // 当 Settings 关掉（activeApp 变回 null）时这个标记会触发弹窗复出。
+  const [like520PopupSuspended, setLike520PopupSuspended] = useState(false);
   useEffect(() => {
     if (showDisclaimer || showUpdateNotification) return;
     if (!isDataLoaded) return;
     if (shouldShowLike520Popup()) setShowLike520Popup(true);
   }, [showDisclaimer, showUpdateNotification, isDataLoaded]);
+
+  // Settings 关掉之后把 520 弹窗弹回来
+  useEffect(() => {
+    if (like520PopupSuspended && activeApp === null) {
+      setLike520PopupSuspended(false);
+      setShowLike520Popup(true);
+    }
+  }, [activeApp, like520PopupSuspended]);
 
   // Capacitor Native Handling
   useEffect(() => {
@@ -509,7 +520,12 @@ const PhoneShell: React.FC = () => {
        {!showDisclaimer && !showUpdateNotification && showLike520Popup && (
          <Like520Controller
            onClose={() => setShowLike520Popup(false)}
-           onCheckApi={() => { setShowLike520Popup(false); openApp(AppID.Settings); }}
+           onCheckApi={() => {
+             // 把弹窗暂时隐起来露出 Settings —— 用户关掉 Settings 回桌面时弹窗会自动复出
+             setShowLike520Popup(false);
+             setLike520PopupSuspended(true);
+             openApp(AppID.Settings);
+           }}
          />
        )}
     </div>
