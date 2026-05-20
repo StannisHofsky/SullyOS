@@ -70,6 +70,10 @@ function buildReasoningPush(args) {
   if (args.contactName !== void 0) push.contactName = args.contactName;
   if (args.avatarUrl !== void 0) push.avatarUrl = args.avatarUrl;
   if (args.messageSubtype !== void 0) push.messageSubtype = args.messageSubtype;
+  if (args.messageIndex !== void 0) push.messageIndex = args.messageIndex;
+  if (args.totalMessages !== void 0) push.totalMessages = args.totalMessages;
+  if (args.chunkIndex !== void 0) push.chunkIndex = args.chunkIndex;
+  if (args.totalChunks !== void 0) push.totalChunks = args.totalChunks;
   if (args.metadata !== void 0) push.metadata = args.metadata;
   return push;
 }
@@ -120,6 +124,34 @@ function buildErrorPush(args) {
   if (args.messageSubtype !== void 0) push.messageSubtype = args.messageSubtype;
   if (args.metadata !== void 0) push.metadata = args.metadata;
   return push;
+}
+var REASONING_CHUNK_ENCODER = new TextEncoder();
+var REASONING_CHUNK_DECODER = new TextDecoder("utf-8", { fatal: true });
+function chunkReasoningByUtf8Bytes(text, maxBytes) {
+  if (typeof text !== "string") {
+    throw new TypeError("[amsg-shared] chunkReasoningByUtf8Bytes: text must be a string");
+  }
+  if (!Number.isInteger(maxBytes) || maxBytes < 4) {
+    throw new RangeError(
+      "[amsg-shared] chunkReasoningByUtf8Bytes: maxBytes must be an integer \u2265 4 (UTF-8 max codepoint width)"
+    );
+  }
+  if (text.length === 0) return [];
+  const bytes = REASONING_CHUNK_ENCODER.encode(text);
+  if (bytes.byteLength <= maxBytes) return [text];
+  const chunks = [];
+  let start = 0;
+  while (start < bytes.byteLength) {
+    let end = Math.min(start + maxBytes, bytes.byteLength);
+    if (end < bytes.byteLength) {
+      while (end > start && (bytes[end] & 192) === 128) {
+        end--;
+      }
+    }
+    chunks.push(REASONING_CHUNK_DECODER.decode(bytes.subarray(start, end)));
+    start = end;
+  }
+  return chunks;
 }
 
 // node_modules/@rei-standard/amsg-instant/dist/adapters/cloudflare.mjs
@@ -338,12 +370,8 @@ function validateInstantPayload(payload, opts) {
   }
   const avatarErr = validateAvatarUrl(payload.avatarUrl);
   if (avatarErr) {
-    return {
-      valid: false,
-      errorCode: "INVALID_PAYLOAD_FORMAT",
-      errorMessage: avatarErr,
-      details: { invalidFields: ["avatarUrl"] }
-    };
+    console.warn("[amsg-instant] avatarUrl \u4E0D\u5408\u6CD5\uFF0C\u5DF2\u7F6E\u7A7A\uFF1A", avatarErr);
+    payload.avatarUrl = null;
   }
   if (payload.messageSubtype !== void 0 && payload.messageSubtype !== null && typeof payload.messageSubtype !== "string") {
     return {
@@ -353,15 +381,8 @@ function validateInstantPayload(payload, opts) {
       details: { invalidFields: ["messageSubtype"] }
     };
   }
-  const splitErr = validateSplitPattern(payload.splitPattern);
-  if (splitErr) {
-    return {
-      valid: false,
-      errorCode: "INVALID_PAYLOAD_FORMAT",
-      errorMessage: splitErr,
-      details: { invalidFields: ["splitPattern"] }
-    };
-  }
+  const splitErr = validatePerKindSplitPatterns(payload);
+  if (splitErr) return splitErr;
   const sharedErr = validateHookPathSharedFields(payload, opts);
   if (sharedErr) return sharedErr;
   return { valid: true };
@@ -465,14 +486,27 @@ function validateContinuePayload(payload, opts) {
   }
   const avatarErr = validateAvatarUrl(payload.avatarUrl);
   if (avatarErr) {
-    return {
-      valid: false,
-      errorCode: "INVALID_PAYLOAD_FORMAT",
-      errorMessage: avatarErr,
-      details: { invalidFields: ["avatarUrl"] }
-    };
+    console.warn("[amsg-instant] /continue avatarUrl \u4E0D\u5408\u6CD5\uFF0C\u5DF2\u7F6E\u7A7A\uFF1A", avatarErr);
+    payload.avatarUrl = null;
   }
+  const splitErr = validatePerKindSplitPatterns(payload);
+  if (splitErr) return splitErr;
   return validateHookPathSharedFields(payload, opts) || { valid: true };
+}
+function validatePerKindSplitPatterns(payload) {
+  for (const field of ["splitPattern", "reasoningSplitPattern", "errorSplitPattern"]) {
+    const err = validateSplitPattern(payload[field]);
+    if (err) {
+      const labelled = field === "splitPattern" ? err : err.replace(/^splitPattern/, field);
+      return {
+        valid: false,
+        errorCode: "INVALID_PAYLOAD_FORMAT",
+        errorMessage: labelled,
+        details: { invalidFields: [field] }
+      };
+    }
+  }
+  return null;
 }
 function validateHookPathSharedFields(payload, opts) {
   if (payload.sessionId !== void 0) {
@@ -867,6 +901,8 @@ function extractAssistantMessage(llmResponse) {
   return { role: "assistant", content: "" };
 }
 var SLEEP_BETWEEN_MESSAGES_MS = 1500;
+var SLEEP_BETWEEN_REASONING_CHUNKS_MS = 100;
+var DEFAULT_REASONING_CHUNK_BYTES = 2e3;
 var DEFAULT_MAX_LOOP_ITERATIONS = 10;
 var DEFAULT_MAX_INLINE_BYTES = 2600;
 var DEFAULT_BLOB_TTL_SECONDS = 60;
@@ -891,6 +927,140 @@ function splitMessageIntoSentences(messageContent, splitPattern = null) {
     chunks = chunks.flatMap((c) => splitOnceByRegex(c, regex));
   }
   return chunks.length > 0 ? chunks : [messageContent];
+}
+function pickSplitConfig(payload, kind) {
+  if (kind === "content" || kind === "tool_request") {
+    const pattern = payload.splitPattern;
+    const disabled = pattern === null || Array.isArray(pattern) && pattern.length === 0;
+    return { textField: "message", pattern, disabled };
+  }
+  if (kind === "reasoning") {
+    const pattern = payload.reasoningSplitPattern;
+    const disabled = pattern === void 0 || pattern === null || Array.isArray(pattern) && pattern.length === 0;
+    return { textField: "reasoningContent", pattern, disabled };
+  }
+  if (kind === "error") {
+    const pattern = payload.errorSplitPattern;
+    const disabled = pattern === void 0 || pattern === null || Array.isArray(pattern) && pattern.length === 0;
+    return { textField: "message", pattern, disabled };
+  }
+  return null;
+}
+function splitHookPushPayload(pushPayload, payload) {
+  if (!pushPayload || typeof pushPayload !== "object" || Array.isArray(pushPayload)) {
+    return [pushPayload];
+  }
+  const pushObj = (
+    /** @type {Record<string, unknown>} */
+    pushPayload
+  );
+  const kind = pushObj.messageKind;
+  const cfg = pickSplitConfig(payload || {}, kind);
+  if (!cfg || cfg.disabled) return [pushPayload];
+  const text = pushObj[cfg.textField];
+  if (typeof text !== "string" || text.length === 0) return [pushPayload];
+  const segments = splitMessageIntoSentences(text, cfg.pattern);
+  if (segments.length <= 1) return [pushPayload];
+  const total = segments.length;
+  return segments.map((segment, i) => {
+    const isLast = i === total - 1;
+    const chunkMessageId = `msg_${randomUUID()}_chunk_${i}`;
+    if (kind === "tool_request" && !isLast) {
+      const { toolCalls: _drop, ...rest } = pushObj;
+      return {
+        ...rest,
+        messageKind: "content",
+        messageId: chunkMessageId,
+        message: segment,
+        messageIndex: i + 1,
+        totalMessages: total
+      };
+    }
+    return {
+      ...pushObj,
+      messageId: chunkMessageId,
+      [cfg.textField]: segment,
+      messageIndex: i + 1,
+      totalMessages: total
+    };
+  });
+}
+async function sendChunkedPush(pushPayload, payload, ctx, sessionId, sleep) {
+  const chunks = splitHookPushPayload(pushPayload, payload);
+  for (let i = 0; i < chunks.length; i++) {
+    await sendPushWithMaybeBlob(chunks[i], payload, ctx, sessionId);
+    if (i < chunks.length - 1) {
+      await sleep(SLEEP_BETWEEN_MESSAGES_MS);
+    }
+  }
+  return chunks.length;
+}
+function expandReasoningPushChunks(reasoningPush, payload, reasoningChunkBytes, iteration) {
+  const layer1 = splitHookPushPayload(reasoningPush, payload);
+  if (reasoningChunkBytes === null) return layer1;
+  const threshold = Number.isInteger(reasoningChunkBytes) && reasoningChunkBytes >= 4 ? reasoningChunkBytes : DEFAULT_REASONING_CHUNK_BYTES;
+  const out = [];
+  for (const segment of layer1) {
+    const text = segment && typeof segment === "object" ? (
+      /** @type {{reasoningContent?: unknown}} */
+      segment.reasoningContent
+    ) : void 0;
+    if (typeof text !== "string" || text.length === 0) {
+      out.push(segment);
+      continue;
+    }
+    const byteLen = PUSH_PAYLOAD_BYTE_ENCODER.encode(text).byteLength;
+    if (byteLen <= threshold) {
+      out.push(segment);
+      continue;
+    }
+    const pieces = chunkReasoningByUtf8Bytes(text, threshold);
+    const totalChunks = pieces.length;
+    const iterTag = Number.isInteger(iteration) ? iteration : 0;
+    for (let i = 0; i < totalChunks; i++) {
+      out.push({
+        ...segment,
+        messageId: `msg_${randomUUID()}_iter_${iterTag}_reasoning_chunk_${i + 1}`,
+        reasoningContent: pieces[i],
+        chunkIndex: i + 1,
+        totalChunks
+      });
+    }
+  }
+  return out;
+}
+async function emitReasoning(reasoningPush, payload, ctx, sessionId, sleep, iteration) {
+  const leaves = expandReasoningPushChunks(reasoningPush, payload, ctx.reasoningChunkBytes, iteration);
+  const byteChunked = leaves.some(
+    (l) => l && typeof l === "object" && /** @type {{totalChunks?: unknown}} */
+    l.totalChunks !== void 0
+  );
+  if (byteChunked) {
+    const onEvent = typeof ctx.onEvent === "function" ? ctx.onEvent : () => {
+    };
+    const totalBytes = typeof reasoningPush.reasoningContent === "string" ? PUSH_PAYLOAD_BYTE_ENCODER.encode(reasoningPush.reasoningContent).byteLength : 0;
+    const evt = { type: "reasoning_chunked", sessionId, totalChunks: leaves.length, totalBytes };
+    if (Number.isInteger(iteration)) evt.iteration = iteration;
+    onEvent(evt);
+  }
+  for (let i = 0; i < leaves.length; i++) {
+    await sendPushWithMaybeBlob(leaves[i], payload, ctx, sessionId);
+    if (i < leaves.length - 1) {
+      const cur = leaves[i];
+      const next = leaves[i + 1];
+      const curIdx = cur && typeof cur === "object" ? (
+        /** @type {{messageIndex?: unknown}} */
+        cur.messageIndex
+      ) : void 0;
+      const nextIdx = next && typeof next === "object" ? (
+        /** @type {{messageIndex?: unknown}} */
+        next.messageIndex
+      ) : void 0;
+      const sameSegment = curIdx === nextIdx;
+      await sleep(sameSegment ? SLEEP_BETWEEN_REASONING_CHUNKS_MS : SLEEP_BETWEEN_MESSAGES_MS);
+    }
+  }
+  return leaves.length;
 }
 function normalizeAiApiUrl(apiUrl) {
   const trimmed = String(apiUrl || "").trim();
@@ -1039,12 +1209,7 @@ async function runLegacyInstant(payload, ctx) {
     });
     let reasoningShipped = false;
     try {
-      await sendWebPush({
-        subscription: pushSubscription,
-        payload: JSON.stringify(reasoningPush),
-        vapid: ctx.vapid,
-        fetch: fetchImpl
-      });
+      await emitReasoning(reasoningPush, payload, ctx, sessionId, sleep, void 0);
       reasoningShipped = true;
       onEvent({ type: "reasoning_pushed", sessionId });
     } catch (err) {
@@ -1099,6 +1264,7 @@ async function runLegacyInstant(payload, ctx) {
 }
 async function runAgenticLoop(payload, ctx) {
   const fetchImpl = ctx.fetch || globalThis.fetch;
+  const sleep = ctx.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const onEvent = typeof ctx.onEvent === "function" ? ctx.onEvent : () => {
   };
   const maxLoopIterations = Number.isInteger(ctx.maxLoopIterations) && ctx.maxLoopIterations > 0 ? ctx.maxLoopIterations : DEFAULT_MAX_LOOP_ITERATIONS;
@@ -1144,7 +1310,7 @@ async function runAgenticLoop(payload, ctx) {
           metadata: payload.metadata || {}
         });
         try {
-          await sendPushWithMaybeBlob(reasoningPush, payload, ctx, sessionId);
+          await emitReasoning(reasoningPush, payload, ctx, sessionId, sleep, iteration);
           onEvent({ type: "reasoning_pushed", sessionId, iteration });
         } catch (err) {
           onEvent({ type: "reasoning_push_failed", sessionId, iteration, cause: err });
@@ -1197,11 +1363,14 @@ async function runAgenticLoop(payload, ctx) {
     if (decision.decision === "skip-push") {
       return { status: "skipped", sessionId, iteration };
     }
-    await sendPushWithMaybeBlob(decision.pushPayload, payload, ctx, sessionId);
+    const isReasoning = decision.pushPayload && typeof decision.pushPayload === "object" && /** @type {{messageKind?: unknown}} */
+    decision.pushPayload.messageKind === "reasoning";
+    const messagesSent = isReasoning ? await emitReasoning(decision.pushPayload, payload, ctx, sessionId, sleep, iteration) : await sendChunkedPush(decision.pushPayload, payload, ctx, sessionId, sleep);
     onEvent({
       type: decision.decision === "finish" ? "final_pushed" : "tool_request_pushed",
       sessionId,
-      iteration
+      iteration,
+      messagesSent
     });
     return { status: decision.decision === "finish" ? "finished" : "tool_requested", sessionId, iteration };
   }
@@ -1217,7 +1386,7 @@ async function runAgenticLoop(payload, ctx) {
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
   try {
-    await sendPushWithMaybeBlob(diagnostic, payload, ctx, sessionId);
+    await sendChunkedPush(diagnostic, payload, ctx, sessionId, sleep);
   } catch (err) {
     onEvent({ type: "diagnostic_push_failed", code: "LOOP_EXCEEDED", sessionId, cause: err });
   }
@@ -1346,12 +1515,7 @@ function createInstantHandler(options) {
   const blobStore = options.blobStore || null;
   const maxLoopIterations = Number.isInteger(options.maxLoopIterations) && options.maxLoopIterations > 0 ? options.maxLoopIterations : 10;
   const autoEmitReasoning = options.autoEmitReasoning !== false;
-  if (onLLMOutput2 && options.splitPattern !== void 0) {
-    const warn = globalThis.console && globalThis.console.warn;
-    if (typeof warn === "function") {
-      warn("[amsg-instant] splitPattern is ignored when onLLMOutput is provided. Move splitting logic into your hook if needed.");
-    }
-  }
+  const reasoningChunkBytes = resolveReasoningChunkBytes(options, blobStore);
   const vapidValid = isVapidConfigValid(options.vapid);
   const respond = (status, body) => jsonResponse(status, body, corsHeaders);
   return async function handler(request) {
@@ -1445,6 +1609,7 @@ function createInstantHandler(options) {
         blobStore,
         maxLoopIterations,
         autoEmitReasoning,
+        reasoningChunkBytes,
         requestUrl: request.url,
         isResume: isContinue
       });
@@ -1459,6 +1624,23 @@ function createInstantHandler(options) {
       });
     }
   };
+}
+var DEFAULT_REASONING_CHUNK_BYTES2 = 2e3;
+var DEFAULT_MAX_INLINE_BYTES_FOR_OVERHEAD_CHECK = 2600;
+var REASONING_CHUNK_BYTES_MIN = 500;
+var REASONING_CHUNK_OVERHEAD_MARGIN = 600;
+function resolveReasoningChunkBytes(options, blobStore) {
+  const raw = options.reasoningChunkBytes;
+  if (raw === void 0) return DEFAULT_REASONING_CHUNK_BYTES2;
+  if (raw === null) return null;
+  const maxInline = blobStore && Number.isInteger(blobStore.maxInlineBytes) && blobStore.maxInlineBytes > 0 ? blobStore.maxInlineBytes : DEFAULT_MAX_INLINE_BYTES_FOR_OVERHEAD_CHECK;
+  const upperBound = maxInline - REASONING_CHUNK_OVERHEAD_MARGIN;
+  if (!Number.isInteger(raw) || raw < REASONING_CHUNK_BYTES_MIN || raw > upperBound) {
+    throw new TypeError(
+      `[amsg-instant] reasoningChunkBytes must be a positive integer in [${REASONING_CHUNK_BYTES_MIN}, ${upperBound}] (= maxInlineBytes ${maxInline} \u2212 ${REASONING_CHUNK_OVERHEAD_MARGIN} overhead margin), or null to disable. Got: ${raw}`
+    );
+  }
+  return raw;
 }
 function mapErrorStatus(err, code) {
   if (err instanceof HookError) return 500;

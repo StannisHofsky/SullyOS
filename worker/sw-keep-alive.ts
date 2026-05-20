@@ -269,6 +269,8 @@ async function saveReasoningToBuffer(payload: any) {
 
   // 0.8.0-next.2 ReasoningPush 自带 (messageIndex, totalMessages, chunkIndex, totalChunks);
   // 老 worker 没这些字段, 兜底 (1, 1) 让单 chunk 也能走累积路径而不需要双分支.
+  // 如果老 worker 罕见地多次推同 sessionId, 多条 chunks 都落在 key=(1,1) — claimReasoning
+  // 排序时 V8/Safari/Firefox 的 Array#sort 是 stable 的, 保留 push 顺序 = 到达顺序.
   const messageIndex = Number.isFinite(payload?.messageIndex) ? Number(payload.messageIndex) : 1;
   const chunkIndex = Number.isFinite(payload?.chunkIndex) ? Number(payload.chunkIndex) : 1;
 
@@ -280,9 +282,14 @@ async function saveReasoningToBuffer(payload: any) {
     const getReq = store.get(sessionId);
     getReq.onsuccess = () => {
       const existing = getReq.result as
-        | { sessionId: string; charId: string; chunks?: Array<{ messageIndex: number; chunkIndex: number; reasoningContent: string }>; receivedAt: number }
+        | { sessionId: string; charId: string; reasoningContent?: string; chunks?: Array<{ messageIndex: number; chunkIndex: number; reasoningContent: string }>; receivedAt: number }
         | undefined;
-      const chunks = existing?.chunks ? [...existing.chunks] : [];
+      // 升级路径兼容: 老 SW (≤1.5.2) 写的是扁平 reasoningContent 字段, 新 SW 第一次
+      // 遇到同 sessionId 时把它转成一条 chunks 条目 (用最小 index 排在最前), 避免静默丢.
+      const seed = (!existing?.chunks && existing?.reasoningContent)
+        ? [{ messageIndex: 0, chunkIndex: 0, reasoningContent: existing.reasoningContent }]
+        : (existing?.chunks ?? []);
+      const chunks = [...seed];
       chunks.push({ messageIndex, chunkIndex, reasoningContent });
       store.put({
         sessionId,

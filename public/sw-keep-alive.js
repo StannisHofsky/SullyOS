@@ -495,7 +495,8 @@ async function saveReasoningToBuffer(payload) {
     const getReq = store.get(sessionId);
     getReq.onsuccess = () => {
       const existing = getReq.result;
-      const chunks = existing?.chunks ? [...existing.chunks] : [];
+      const seed = !existing?.chunks && existing?.reasoningContent ? [{ messageIndex: 0, chunkIndex: 0, reasoningContent: existing.reasoningContent }] : existing?.chunks ?? [];
+      const chunks = [...seed];
       chunks.push({ messageIndex, chunkIndex, reasoningContent });
       store.put({
         sessionId,
