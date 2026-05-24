@@ -1375,6 +1375,10 @@ export default {
     const apiMatch = url.pathname.match(/^\/api\/(.+)$/);
     if (apiMatch) {
       const command = apiMatch[1].replace(/\/+$/, '');
+      // 探活：前端 testConnection 会先 GET /api/health（不带 cookie），不能要求鉴权
+      if (command === 'health') {
+        return jsonResponse({ status: 'ok', backend: 'xhs-lite', signing: 'xhshow-pure-js' }, { origin });
+      }
       let body = {};
       if (request.method === 'POST') { try { body = await request.json(); } catch (e) { /* allow empty */ } }
       const cookie = request.headers.get('x-xhs-cookie') || body.cookie || (env && env.XHS_COOKIE) || '';
