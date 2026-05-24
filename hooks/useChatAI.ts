@@ -585,20 +585,20 @@ export const useChatAI = ({
                 finally { perfStages[label] = Math.round(performance.now() - t0); }
             };
 
-            // 0.9 历史消息加载（DB 取完整窗口，最多 contextLimit；React state 上限 200 条）
-            //     和 buildChatRequestPayload 并行跑，省一次 DB 来回的等待
+            // 0.9 历史消息加载: AI 上下文以 DB 最新状态为准.
+            // 刚保存消息后 React state 可能还是旧快照; 每次触发都读最近 contextLimit 条,
+            // 避免自动回复 / 手动触发在时序边界漏掉刚写入的消息或派生卡片。
             const limit = char.contextLimit || 500;
-            const fullHistoryPromise: Promise<Message[] | null> = (limit > currentMsgs.length && char.id)
+            const fullHistoryPromise: Promise<Message[] | null> = char.id
                 ? DB.getRecentMessagesByCharId(char.id, limit).catch(e => {
                     console.error('Failed to load full history from DB, using React state:', e);
                     return null;
                 })
                 : Promise.resolve(null);
             const fullHistory = await stageT('dbHistory', fullHistoryPromise);
-            let contextMsgs = currentMsgs;
-            if (fullHistory && fullHistory.length > currentMsgs.length) {
+            const contextMsgs = fullHistory || currentMsgs;
+            if (fullHistory) {
                 console.log(`📊 [Context] Loaded ${fullHistory.length} msgs from DB (React state had ${currentMsgs.length}, contextLimit=${limit})`);
-                contextMsgs = fullHistory;
             }
 
             // 1. 构造完整 chat 请求载荷（memoryPalace 召回 + system prompt + 双语 / HTML / 思考链 / MCD + 历史）
