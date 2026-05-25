@@ -3034,6 +3034,7 @@ async function runEmotionEval(body, env, requestUrl) {
   const evalMessages = [{ role: "user", content: evalContent }];
   try {
     const baseUrl = String(ee.api.baseUrl).replace(/\/+$/, "");
+    console.log("[TIMING] emotion: LLM call start", (/* @__PURE__ */ new Date()).toISOString());
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
@@ -3047,6 +3048,7 @@ async function runEmotionEval(body, env, requestUrl) {
         stream: false
       })
     });
+    console.log("[TIMING] emotion: LLM call done", res.status, (/* @__PURE__ */ new Date()).toISOString());
     let raw = "";
     if (res.ok) {
       const data = await res.json();
@@ -3081,6 +3083,7 @@ async function runEmotionEval(body, env, requestUrl) {
         }
       }
     }, body?.sessionId || "");
+    console.log("[TIMING] emotion: push sent", (/* @__PURE__ */ new Date()).toISOString());
   } catch (e) {
     console.error("[emotion-eval] failed", e);
   }
@@ -3101,9 +3104,14 @@ var src_default = {
     const workerEnv = await prepareBlobStoreEnv(requestedEnv);
     scheduleD1BlobCleanup(workerEnv, ctx);
     if (body?.emotionEval) {
+      console.log("[TIMING] emotion: dispatched", (/* @__PURE__ */ new Date()).toISOString());
       ctx.waitUntil(runEmotionEval(body, workerEnv, request.url));
     }
-    const replyPromise = cfWorker.fetch(request, workerEnv, ctx);
+    console.log("[TIMING] reply: dispatched", (/* @__PURE__ */ new Date()).toISOString());
+    const replyPromise = cfWorker.fetch(request, workerEnv, ctx).then((r) => {
+      console.log("[TIMING] reply: done (all reply pushes sent)", (/* @__PURE__ */ new Date()).toISOString());
+      return r;
+    });
     ctx.waitUntil(replyPromise);
     return await replyPromise;
   },

@@ -359,6 +359,7 @@ async function runEmotionEval(body: any, env: Env, requestUrl?: string): Promise
   const evalMessages = [{ role: 'user', content: evalContent }];
   try {
     const baseUrl = String(ee.api.baseUrl).replace(/\/+$/, '');
+    console.log('[TIMING] emotion: LLM call start', new Date().toISOString());
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -372,6 +373,7 @@ async function runEmotionEval(body: any, env: Env, requestUrl?: string): Promise
         stream: false,
       }),
     });
+    console.log('[TIMING] emotion: LLM call done', res.status, new Date().toISOString());
     let raw = '';
     if (res.ok) {
       const data: any = await res.json();
@@ -412,6 +414,7 @@ async function runEmotionEval(body: any, env: Env, requestUrl?: string): Promise
         }
       },
     } as any, body?.sessionId || '');
+    console.log('[TIMING] emotion: push sent', new Date().toISOString());
   } catch (e) {
     console.error('[emotion-eval] failed', e);
   }
@@ -445,8 +448,10 @@ export default {
     // 所以与主回复**并行**跑, 而不是 await cfWorker.fetch (流式输出 + 推送 + 收尾可能拖 ~30s)
     // 完成后才启动 —— 砍掉情绪评估的启动延迟, 让 buff / "情绪分析中" 徽章尽快结算.
     if (body?.emotionEval) {
+      console.log('[TIMING] emotion: dispatched', new Date().toISOString());
       ctx.waitUntil(runEmotionEval(body, workerEnv, request.url));
     }
+    console.log('[TIMING] reply: dispatched', new Date().toISOString());
     // 主回复 (LLM 生成 + 切段 + 逐条推送) 在 amsg-instant 库里是同步 await 跑的,
     // 库的 createCloudflareWorker.fetch 只收 (request, env), 拿不到 ctx, 所以**不会**
     // 自己进 waitUntil. 客户端关浏览器 / 切后台导致连接断开时, Cloudflare 可能把这条
@@ -454,7 +459,11 @@ export default {
     // (情绪有下面那条 waitUntil 护着, 主回复没有, 差别就在这).
     // 这里手动把主回复 promise 也挂进 waitUntil: 即使客户端断开, worker 也会活到
     // 生成 + 全部推送跑完为止; 客户端仍在线时 return await 照常拿到 200 + 诊断 data.
-    const replyPromise = (cfWorker as any).fetch(request, workerEnv, ctx);
+    const replyPromise = (cfWorker as any).fetch(request, workerEnv, ctx)
+      .then((r: any) => {
+        console.log('[TIMING] reply: done (all reply pushes sent)', new Date().toISOString());
+        return r;
+      });
     ctx.waitUntil(replyPromise);
     return await replyPromise;
   },
