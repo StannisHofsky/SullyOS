@@ -11,6 +11,7 @@ import {
   normalizeWorkerUrl,
 } from '../../utils/instantPushClient';
 import { isPushVapidReady } from '../../utils/pushVapid';
+import { markWorkerBuildSeen } from '../WorkerUpdateReminderEvent';
 import { InstantPushConfig } from '../../types';
 
 interface InstantPushSettingsModalProps {
@@ -232,7 +233,10 @@ export const InstantPushSettingsModal: React.FC<InstantPushSettingsModalProps> =
   };
 
   const handleSave = () => {
-    saveInstantConfig(currentCfg());
+    const cfg = currentCfg();
+    saveInstantConfig(cfg);
+    // 保存为启用状态视为「已按当前 worker 版本配好」，避免随后被无意义地提醒更新。
+    if (cfg.enabled) markWorkerBuildSeen();
     addToast('Instant Push 配置已保存', 'success');
     onClose();
   };
