@@ -104,15 +104,11 @@ export async function applyEmotionEvalRaw(
             ...charData,
             activeBuffs: sanitizedBuffs,
             buffInjection: result.injection || '',
-                };
-        try {
-            await DB.saveCharacter(updated);
-        } catch (dbErr: any) {
-            console.warn('🎭 [Emotion] DB save failed (non-fatal):', dbErr?.message);
-        }
+        };
+        await DB.saveCharacter(updated);
 
         // detail 直接带上 buffs + buffInjection: 监听方 (Chat) 可直接落 OSContext, 不必重读 DB
-        // — 避开 saveCharacter 未等事务提交 / instant flush 下 DB 重读偶发拿旧值的竞态.
+        // —— 避开 saveCharacter 未等事务提交 / instant flush 下 DB 重读偶发拿旧值的竞态.
         window.dispatchEvent(new CustomEvent('emotion-updated', {
             detail: { charId: charData.id, buffs: sanitizedBuffs, buffInjection: result.injection || '' },
         }));
